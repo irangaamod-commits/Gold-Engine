@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gold Multi-Timeframe Liquidity Engine</title>
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- Force exact version 4.1.1 to avoid caching issues -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root {
       --bg: #0f1218;
@@ -35,7 +36,6 @@
       gap: 8px;
     }
     
-    /* Fullscreen landscape mode styles */
     body.is-fullscreen {
       padding: 0;
       gap: 0;
@@ -67,8 +67,13 @@
       border-radius: 12px;
       border: 1px solid var(--line);
       color: var(--mut);
+      max-width: 150px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     #status.live { color: var(--up); border-color: var(--up); }
+    #status.error { color: var(--dn); border-color: var(--dn); }
 
     .controls-panel {
       display: flex;
@@ -142,7 +147,6 @@
     .bar-bg { height: 6px; background: var(--dn); border-radius: 3px; overflow: hidden; margin-top: 4px; }
     .bar-fill { height: 100%; background: var(--up); width: 50%; }
 
-    /* Overlay controls inside chart for Landscape/Fullscreen */
     .fs-overlay-controls {
       position: absolute;
       top: 10px;
@@ -159,7 +163,7 @@
 <body>
 
   <header>
-    <h1>Gold Engine (Binance PAXG)</h1>
+    <h1>Gold Engine (Binance)</h1>
     <span id="status">Connecting...</span>
   </header>
 
@@ -222,35 +226,39 @@
   let ema50Series = null;
 
   const chartElement = document.getElementById('chart-container');
+  const statusEl = document.getElementById('status');
 
-  // Initialize TradingView Lightweight Chart (Fixed for v4 syntax)
   function initChart() {
-    chart = LightweightCharts.createChart(chartElement, {
-      layout: { 
-        background: { type: 'solid', color: '#0f1218' }, 
-        textColor: '#ecebe6' 
-      },
-      grid: { vertLines: { color: '#1d2330' }, horzLines: { color: '#1d2330' } },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      priceScale: { borderColor: '#26a69a' },
-      timeScale: { borderColor: '#26a69a', timeVisible: true, secondsVisible: false }
-    });
+    try {
+      chart = LightweightCharts.createChart(chartElement, {
+        layout: { 
+          background: { type: 'solid', color: '#0f1218' }, 
+          textColor: '#ecebe6' 
+        },
+        grid: { vertLines: { color: '#1d2330' }, horzLines: { color: '#1d2330' } },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        priceScale: { borderColor: '#26a69a' },
+        timeScale: { borderColor: '#26a69a', timeVisible: true, secondsVisible: false }
+      });
 
-    candleSeries = chart.addCandlestickSeries({
-      upColor: '#2fd3a0', downColor: '#ff5f7e',
-      borderUpColor: '#2fd3a0', borderDownColor: '#ff5f7e',
-      wickUpColor: '#2fd3a0', wickDownColor: '#ff5f7e'
-    });
+      candleSeries = chart.addCandlestickSeries({
+        upColor: '#2fd3a0', downColor: '#ff5f7e',
+        borderUpColor: '#2fd3a0', borderDownColor: '#ff5f7e',
+        wickUpColor: '#2fd3a0', wickDownColor: '#ff5f7e'
+      });
 
-    ema20Series = chart.addLineSeries({ color: '#e6b450', lineWidth: 1, crosshairMarkerVisible: false });
-    ema50Series = chart.addLineSeries({ color: '#2196f3', lineWidth: 1, crosshairMarkerVisible: false });
+      ema20Series = chart.addLineSeries({ color: '#e6b450', lineWidth: 1 });
+      ema50Series = chart.addLineSeries({ color: '#2196f3', lineWidth: 1 });
 
-    window.addEventListener('resize', () => {
-      chart.applyOptions({ width: chartElement.clientWidth, height: chartElement.clientHeight });
-    });
+      window.addEventListener('resize', () => {
+        chart.applyOptions({ width: chartElement.clientWidth, height: chartElement.clientHeight });
+      });
+    } catch (err) {
+      statusEl.innerText = "Chart Init Err: " + err.message;
+      statusEl.className = 'error';
+    }
   }
 
-  // Fullscreen Management
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => console.log(err));
@@ -267,10 +275,10 @@
   document.getElementById('toggle-fs').addEventListener('click', toggleFullscreen);
   document.getElementById('exit-fs').addEventListener('click', toggleFullscreen);
 
-  // EMA Calculation
   function calculateEMA(data, period) {
     let k = 2 / (period + 1);
     let emaData = [];
+    if(data.length === 0) return emaData;
     let ema = data[0].close;
     for (let i = 0; i < data.length; i++) {
       ema = data[i].close * k + ema * (1 - k);
@@ -279,16 +287,16 @@
     return emaData;
   }
 
-  // Fetch Binance Historical Klines (Fixed API Endpoint)
   async function loadData(tf) {
-    document.getElementById('status').innerText = 'Loading ' + tf + '...';
-    document.getElementById('status').classList.remove('live');
+    statusEl.innerText = 'Loading ' + tf + '...';
+    statusEl.className = '';
     
     try {
-      // Changed to data-api.binance.vision to avoid browser CORS issues
-      let res = await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=PAXGUSDT&interval=${tf}&limit=200`);
-      if (!res.ok) throw new Error('Network response was not ok');
+      let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=${tf}&limit=200`);
+      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+      
       let json = await res.json();
+      if (!Array.isArray(json) || json.length === 0) throw new Error("Empty API Data");
       
       let candles = json.map(d => ({
         time: Math.floor(d[0] / 1000),
@@ -300,6 +308,9 @@
         takerBuyVol: parseFloat(d[9])
       }));
 
+      // Sort just in case API returns unsorted data
+      candles.sort((a, b) => a.time - b.time);
+
       candleSeries.setData(candles);
       ema20Series.setData(calculateEMA(candles, 20));
       ema50Series.setData(calculateEMA(candles, 50));
@@ -307,36 +318,38 @@
       analyzeStructure(candles);
       connectWebSocket(tf);
 
-      document.getElementById('status').innerText = 'LIVE · PAXGUSDT (' + tf.toUpperCase() + ')';
-      document.getElementById('status').classList.add('live');
+      statusEl.innerText = 'LIVE · PAXGUSDT';
+      statusEl.className = 'live';
     } catch (e) {
+      statusEl.innerText = 'Err: ' + e.message;
+      statusEl.className = 'error';
       console.error(e);
-      document.getElementById('status').innerText = 'Data Error';
     }
   }
 
-  // Realtime Binance WebSocket
   function connectWebSocket(tf) {
     if (ws) ws.close();
     ws = new WebSocket(`wss://stream.binance.com:9443/ws/paxgusdt@kline_${tf}`);
 
     ws.onmessage = (event) => {
-      let msg = JSON.parse(event.data);
-      let k = msg.k;
-      let candle = {
-        time: Math.floor(k.t / 1000),
-        open: parseFloat(k.o),
-        high: parseFloat(k.h),
-        low: parseFloat(k.l),
-        close: parseFloat(k.c),
-        volume: parseFloat(k.v)
-      };
-
-      candleSeries.update(candle);
+      try {
+        let msg = JSON.parse(event.data);
+        let k = msg.k;
+        let candle = {
+          time: Math.floor(k.t / 1000),
+          open: parseFloat(k.o),
+          high: parseFloat(k.h),
+          low: parseFloat(k.l),
+          close: parseFloat(k.c),
+          volume: parseFloat(k.v)
+        };
+        candleSeries.update(candle);
+      } catch (err) {
+        console.error("WS Update Error", err);
+      }
     };
   }
 
-  // Simple Structure & Confluence Signal Logic
   function analyzeStructure(candles) {
     if (candles.length < 50) return;
     let last = candles[candles.length - 1];
@@ -350,16 +363,14 @@
     document.getElementById('bsl-val').innerText = maxHigh.toFixed(2);
     document.getElementById('ssl-val').innerText = minLow.toFixed(2);
 
-    // Taker volume buyer/seller percentage
     let totalVol = candles.slice(-20).reduce((acc, c) => acc + c.volume, 0);
     let takerBuy = candles.slice(-20).reduce((acc, c) => acc + c.takerBuyVol, 0);
-    let buyPct = Math.round((takerBuy / totalVol) * 100) || 50;
+    let buyPct = totalVol > 0 ? Math.round((takerBuy / totalVol) * 100) : 50;
     let sellPct = 100 - buyPct;
 
     document.getElementById('bs-ratio').innerText = `${buyPct}% / ${sellPct}%`;
     document.getElementById('bs-bar').style.width = `${buyPct}%`;
 
-    // Signal Determination
     let sigBox = document.getElementById('signal-box');
     let sigTitle = document.getElementById('signal-title');
     let sigLevels = document.getElementById('signal-levels');
@@ -373,14 +384,14 @@
       let sl = (last.close - 2.5).toFixed(2);
       let tp1 = (last.close + 3.0).toFixed(2);
       let tp2 = (last.close + 6.0).toFixed(2);
-      sigLevels.innerHTML = `Entry: <b>${last.close.toFixed(2)}</b> | SL: <span style="color:var(--dn)">${sl}</span> | TP1: <span style="color:var(--up)">${tp1}</span> | TP2: <span style="color:var(--up)">${tp2}</span>`;
+      sigLevels.innerHTML = `Entry: <b>${last.close.toFixed(2)}</b> | SL: <span style="color:var(--dn)">${sl}</span> | TP1: <span style="color:var(--up)">${tp1}</span>`;
     } else if (isBearish) {
       sigBox.className = 'sell';
       sigTitle.innerText = 'SELL SIGNAL';
       let sl = (last.close + 2.5).toFixed(2);
       let tp1 = (last.close - 3.0).toFixed(2);
       let tp2 = (last.close - 6.0).toFixed(2);
-      sigLevels.innerHTML = `Entry: <b>${last.close.toFixed(2)}</b> | SL: <span style="color:var(--dn)">${sl}</span> | TP1: <span style="color:var(--up)">${tp1}</span> | TP2: <span style="color:var(--up)">${tp2}</span>`;
+      sigLevels.innerHTML = `Entry: <b>${last.close.toFixed(2)}</b> | SL: <span style="color:var(--dn)">${sl}</span> | TP1: <span style="color:var(--up)">${tp1}</span>`;
     } else {
       sigBox.className = '';
       sigTitle.innerText = 'WAIT / NEUTRAL';
@@ -388,21 +399,22 @@
     }
   }
 
-  // Timeframe Switcher Event Handlers
   document.querySelectorAll('.tf-btn, .tf-btn-fs').forEach(btn => {
     btn.addEventListener('click', (e) => {
       let tf = e.target.getAttribute('data-tf');
       currentTF = tf;
-      document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll(`.tf-btn[data-tf="${tf}"]`).forEach(b => b.classList.add('active'));
+      document.querySelectorAll('.tf-btn, .tf-btn-fs').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll(`[data-tf="${tf}"]`).forEach(b => b.classList.add('active'));
       document.getElementById('signal-tf').innerText = tf.toUpperCase() + ' Analysis';
       loadData(tf);
     });
   });
 
-  // Startup
-  initChart();
-  loadData(currentTF);
+  // Delay init slightly to ensure DOM is ready on mobile browsers
+  setTimeout(() => {
+    initChart();
+    loadData(currentTF);
+  }, 200);
 </script>
 </body>
 </html>
