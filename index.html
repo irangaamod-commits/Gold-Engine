@@ -223,10 +223,13 @@
 
   const chartElement = document.getElementById('chart-container');
 
-  // Initialize TradingView Lightweight Chart
+  // Initialize TradingView Lightweight Chart (Fixed for v4 syntax)
   function initChart() {
     chart = LightweightCharts.createChart(chartElement, {
-      layout: { backgroundColor: '#0f1218', textColor: '#ecebe6' },
+      layout: { 
+        background: { type: 'solid', color: '#0f1218' }, 
+        textColor: '#ecebe6' 
+      },
       grid: { vertLines: { color: '#1d2330' }, horzLines: { color: '#1d2330' } },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
       priceScale: { borderColor: '#26a69a' },
@@ -239,8 +242,8 @@
       wickUpColor: '#2fd3a0', wickDownColor: '#ff5f7e'
     });
 
-    ema20Series = chart.addLineSeries({ color: '#e6b450', lineWidth: 1 });
-    ema50Series = chart.addLineSeries({ color: '#2196f3', lineWidth: 1 });
+    ema20Series = chart.addLineSeries({ color: '#e6b450', lineWidth: 1, crosshairMarkerVisible: false });
+    ema50Series = chart.addLineSeries({ color: '#2196f3', lineWidth: 1, crosshairMarkerVisible: false });
 
     window.addEventListener('resize', () => {
       chart.applyOptions({ width: chartElement.clientWidth, height: chartElement.clientHeight });
@@ -276,13 +279,15 @@
     return emaData;
   }
 
-  // Fetch Binance Historical Klines
+  // Fetch Binance Historical Klines (Fixed API Endpoint)
   async function loadData(tf) {
     document.getElementById('status').innerText = 'Loading ' + tf + '...';
     document.getElementById('status').classList.remove('live');
     
     try {
-      let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=${tf}&limit=200`);
+      // Changed to data-api.binance.vision to avoid browser CORS issues
+      let res = await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=PAXGUSDT&interval=${tf}&limit=200`);
+      if (!res.ok) throw new Error('Network response was not ok');
       let json = await res.json();
       
       let candles = json.map(d => ({
@@ -305,6 +310,7 @@
       document.getElementById('status').innerText = 'LIVE · PAXGUSDT (' + tf.toUpperCase() + ')';
       document.getElementById('status').classList.add('live');
     } catch (e) {
+      console.error(e);
       document.getElementById('status').innerText = 'Data Error';
     }
   }
@@ -334,7 +340,6 @@
   function analyzeStructure(candles) {
     if (candles.length < 50) return;
     let last = candles[candles.length - 1];
-    let prev = candles[candles.length - 2];
 
     let highList = candles.map(c => c.high);
     let lowList = candles.map(c => c.low);
