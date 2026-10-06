@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gold Liquidity Engine</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f5f3ee;--card:#fff;--tx:#1b1a17;--mut:#6f6a5e;--grid:#e8e4da;--up:#0d9f6e;--dn:#d63a56;--gold:#b8842a;--line:#ded9cc}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1218;--card:#171c26;--tx:#ecebe6;--mut:#8f93a0;--grid:#1d2330;--up:#2fd3a0;--dn:#ff5f7e;--gold:#e6b450;--line:#262d3b}}
+:root[data-theme="dark"]{--bg:#0f1218;--card:#171c26;--tx:#ecebe6;--mut:#8f93a0;--grid:#1d2330;--up:#2fd3a0;--dn:#ff5f7e;--gold:#e6b450;--line:#262d3b}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:12px 12px 24px;max-width:760px;margin:0 auto;font-variant-numeric:tabular-nums}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+h1{font:600 18px/1.2 Georgia,serif;margin:0}
+#st{font-size:12px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+#st.live{color:var(--up);border-color:var(--up)}
+#c{width:100%;height:50vh;min-height:300px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--bg)}
+#sig{margin-top:10px;padding:12px;border:1px solid var(--line);border-left:5px solid var(--mut);border-radius:6px;background:var(--card)}
+#sig.buy{border-left-color:var(--up)}#sig.sell{border-left-color:var(--dn)}
+#sig b{font:600 22px Georgia,serif}#sig.buy b{color:var(--up)}#sig.sell b{color:var(--dn)}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.g div{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.g small{display:block;color:var(--mut);font-size:12px}
+ul{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:13px}li.y{color:var(--tx)}
+.bar{height:6px;border-radius:3px;background:var(--dn);margin-top:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--up)}
+footer{margin-top:12px;color:var(--mut);font-size:12px}
+</style></head><body>
+<header><h1>Gold Liquidity Engine</h1><span id="st">starting…</span></header>
+<div id="c"></div>
+<div id="sig"><b id="sg">WAIT</b> <span id="sc"></span><div id="pl" style="margin-top:6px"></div><ul id="ck"></ul></div>
+<div class="g">
+<div><small>Buyers vs sellers (estimated)</small><span id="bs">-</span><div class="bar"><i id="bb" style="width:50%"></i></div></div>
+<div><small>Volume POC (tick-range based)</small><span id="poc">-</span></div>
+<div><small>Liquidity above (equal highs)</small><span id="bsl">-</span></div>
+<div><small>Liquidity below (equal lows)</small><span id="ssl">-</span></div>
+</div>
+<footer>XAU/USD · 5m. Zones and signals are rule-based estimates from price structure, not real order flow. Backtest before trading real money. Not financial advice.</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.js"></script>
+<script>
+const $=id=>document.getElementById(id),v=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const box=$('c');
+if(!window.LightweightCharts){box.textContent='Chart library failed to load. Check your connection.'}else{
+const UP=v('--up'),DN=v('--dn'),GOLD=v('--gold');
+const chart=LightweightCharts.createChart(box,{width:box.clientWidth,height:box.clientHeight,layout:{background:{color:v('--bg')},textColor:v('--mut')},grid:{vertLines:{color:v('--grid')},horzLines:{color:v('--grid')}},timeScale:{timeVisible:true,secondsVisible:false,borderColor:v('--grid')},rightPriceScale:{borderColor:v('--grid')}});
+addEventListener('resize',()=>chart.applyOptions({width:box.clientWidth,height:box.clientHeight}));
+const cs=chart.addCandlestickSeries({upColor:UP,downColor:DN,borderVisible:false,wickUpColor:UP,wickDownColor:DN});
+const s20=chart.addLineSeries({color:GOLD,lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const s50=chart.addLineSeries({color:'#5b8def',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+let C=[],lines=[],mode='',busy=0;
+const status=(t,l)=>{$('st').textContent=t;$('st').className=l?'live':''};
+const ema=(a,p)=>{const k=2/(p+1);let e=a[0];return a.map((x,i)=>i?(e=x*k+e*(1-k)):e)};
+const f=x=>x.toFixed(2);
+function clusters(idx,key,above,atr){
+ const pts=idx.slice(-25).map(i=>({i,v:C[i][key]})),used=new Set(),out=[];
+ pts.forEach((a,x)=>{if(used.has(x))return;
+  const g=pts.filter((b,y)=>!used.has(y)&&Math.abs(b.v-a.v)<=atr*.35);
+  if(g.length<2)return;g.forEach(b=>used.add(pts.indexOf(b)));
+  const val=g.reduce((s,b)=>s+b.v,0)/g.length,last=Math.max(...g.map(b=>b.i)),after=C.slice(last+1);
+  const swept=above?after.some(c=>c.high>val+atr*.35):after.some(c=>c.low<val-atr*.35);
+  if(!swept)out.push(val)});
+ return out.slice(-3)}
+function analyze(){
+ const n=C.length;if(n<60)return;
+ const cl=C.map(c=>c.close),e20=ema(cl,20),e50=ema(cl,50),L=3;
+ let atr=0;for(let i=n-14;i<n;i++)atr+=Math.max(C[i].high-C[i].low,Math.abs(C[i].high-cl[i-1]),Math.abs(C[i].low-cl[i-1]));atr/=14;
+ const ph=[],pl=[];
+ for(let i=L;i<n-L;i++){let h=1,l=1;for(let j=1;j<=L;j++){if(C[i].high<=C[i-j].high||C[i].high<=C[i+j].high)h=0;if(C[i].low>=C[i-j].low||C[i].low>=C[i+j].low)l=0}if(h)ph.push(i);if(l)pl.push(i)}
+ const H=new Set(ph),Lw=new Set(pl);let lh=null,ll=null,tr=0;const mk=[];
+ for(let i=L*2;i<n;i++){const p=i-L;if(H.has(p))lh=C[p].high;if(Lw.has(p))ll=C[p].low;
+  if(lh!==null&&cl[i]>lh){mk.push({time:C[i].time,position:'belowBar',color:UP,shape:'arrowUp',text:tr<0?'CHoCH':'BOS'});tr=1;lh=null}
+  else if(ll!==null&&cl[i]<ll){mk.push({time:C[i].time,position:'aboveBar',color:DN,shape:'arrowDown',text:tr>0?'CHoCH':'BOS'});tr=-1;ll=null}}
+ // volume POC from candle range (gold has no real volume)
+ const seg=C.slice(-150),lo=Math.min(...seg.map(c=>c.low)),hi=Math.max(...seg.map(c=>c.high)),B=24,bins=Array(B).fill(0),bw=(hi-lo)/B||1;
+ seg.forEach(c=>{const m=(c.high+c.low+c.close)/3;bins[Math.min(B-1,Math.floor((m-lo)/bw))]+=(c.high-c.low)+.01});
+ const poc=lo+(bins.indexOf(Math.max(...bins))+.5)*bw;
+ // buyers vs sellers estimate
+ const r=C.slice(-30);let bu=0,tot=0;r.forEach(c=>{const g=c.high-c.low||.01;bu+=(c.close-c.low)/g*g;tot+=g});const buy=Math.round(bu/tot*100);
+ const last=C[n-1],cp=last.close,bsl=clusters(ph,'high',1,atr),ssl=clusters(pl,'low',0,atr);
+ const ck=[['EMA20 above EMA50',e20[n-1]>e50[n-1]],['Price above EMA20',cp>e20[n-1]],['Structure bullish (last break up)',tr===1],['Price above volume POC',cp>poc],['Buyers over 55% (est.)',buy>55],['10-bar momentum up',cp>cl[n-11]]];
+ const bull=ck.filter(x=>x[1]).length;
+ const side=bull>=5?'buy':bull<=1?'sell':'wait',d=side==='buy'?1:-1;
+ // draw
+ cs.setData(C);s20.setData(C.map((c,i)=>({time:c.time,value:e20[i]})));s50.setData(C.map((c,i)=>({time:c.time,value:e50[i]})));cs.setMarkers(mk.slice(-14));
+ lines.forEach(l=>cs.removePriceLine(l));lines=[];
+ const pline=(price,color,title,st)=>lines.push(cs.createPriceLine({price,color,lineWidth:1,lineStyle:st,axisLabelVisible:true,title}));
+ pline(poc,GOLD,'POC',2);bsl.forEach(x=>pline(x,DN,'Liq high',0));ssl.forEach(x=>pline(x,UP,'Liq low',0));
+ let pt='No trade: signals need 5 of 6 checks to agree.';
+ if(side!=='wait'){const sl=cp-d*atr*1.5,t1=cp+d*atr*2.25,t2=cp+d*atr*4.5;pline(cp,'#999','Entry',1);pline(sl,DN,'SL',1);pline(t1,UP,'TP1',1);pline(t2,UP,'TP2',1);
+  pt=`Entry ${f(cp)} · SL ${f(sl)} · TP1 ${f(t1)} · TP2 ${f(t2)}`}
+ $('sig').className=side;$('sg').textContent=side==='wait'?'WAIT':side.toUpperCase();$('sc').textContent=`${bull}/6 bullish checks`;$('pl').textContent=pt;
+ $('ck').innerHTML=ck.map(x=>`<li class="${x[1]?'y':''}">${x[1]?'✔':'✖'} ${x[0]}</li>`).join('');
+ $('bs').textContent=`${buy}% buyers / ${100-buy}% sellers`;$('bb').style.width=buy+'%';$('poc').textContent=f(poc);
+ $('bsl').textContent=bsl.length?bsl.map(f).join(', '):'none unswept';$('ssl').textContent=ssl.length?ssl.map(f).join(', '):'none unswept'}
+const refresh=()=>{if(busy)return;busy=1;setTimeout(()=>{busy=0;analyze()},400)};
+function demo(){
+ if(mode==='demo')return;mode='demo';status('DEMO · simulated prices');
+ let p=4170,ph=0,t=Math.floor(Date.now()/300000)*300-299*300;C=[];
+ const step=()=>p+=Math.sin(ph+=.04)*.5+(Math.random()-.5)*1.8;
+ for(let i=0;i<300;i++){const o=p;let h=o,l=o;for(let k=0;k<5;k++){step();h=Math.max(h,p);l=Math.min(l,p)}C.push({time:t+i*300,open:o,high:h,low:l,close:p})}
+ analyze();chart.timeScale().fitContent();let k=0;
+ setInterval(()=>{const c=C[C.length-1];step();c.close=p;c.high=Math.max(c.high,p);c.low=Math.min(c.low,p);
+  if(++k%15===0)C.push({time:c.time+300,open:p,high:p,low:p,close:p});refresh()},1000)}
+function live(){
+ let ok=0,ws;try{ws=new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089')}catch(e){return demo()}
+ const to=setTimeout(()=>{if(!ok){try{ws.close()}catch(e){}demo()}},5000);
+ ws.onopen=()=>ws.send(JSON.stringify({ticks_history:'frxXAUUSD',style:'candles',granularity:300,count:300,end:'latest',subscribe:1}));
+ ws.onerror=()=>{if(!ok){clearTimeout(to);demo()}};
+ ws.onmessage=m=>{const d=JSON.parse(m.data);
+  if(d.error){clearTimeout(to);ws.close();return demo()}
+  if(d.candles){ok=1;clearTimeout(to);mode='live';status('LIVE · Deriv XAUUSD 5m',1);C=d.candles.map(x=>({time:x.epoch,open:+x.open,high:+x.high,low:+x.low,close:+x.close}));analyze();chart.timeScale().fitContent()}
+  else if(d.ohlc){const x=d.ohlc,c={time:+x.open_time,open:+x.open,high:+x.high,low:+x.low,close:+x.close},l=C[C.length-1];if(l&&l.time===c.time)C[C.length-1]=c;else C.push(c);refresh()}}}
+live();
+}
+</script></body></html>
